@@ -1,12 +1,12 @@
 
 import streamlit as st
 import pandas as pd
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 import urllib.parse
 
 st.set_page_config(page_title="Gestor Dental IA", layout="wide")
 
-# Inicializar estructuras de datos
+# Inicializar estructuras
 if "doctores" not in st.session_state:
     st.session_state.doctores = []
 
@@ -18,6 +18,9 @@ if "citas" not in st.session_state:
 
 if "detalles" not in st.session_state:
     st.session_state.detalles = []
+
+if "hora_seleccionada" not in st.session_state:
+    st.session_state.hora_seleccionada = None
 
 st.title("🦷 Gestor Dental IA")
 st.markdown("---")
@@ -95,72 +98,44 @@ if st.session_state.get("view") == "paciente":
 # AGENDAR CITA
 if st.session_state.get("view") == "cita":
     st.subheader("📅 Agendar Cita")
-    if st.session_state.pacientes and st.session_state.doctores:
-        paciente = st.selectbox("Seleccionar paciente", [p['nombre'] for p in st.session_state.pacientes])
-        doctor = st.selectbox("Seleccionar doctor", [d['nombre'] for d in st.session_state.doctores])
-        fecha = st.date_input("Seleccionar fecha", value=date.today())
-        hora = st.time_input("Seleccionar hora")
-        tratamiento = st.text_input("Tratamiento realizado")
 
-        if st.button("Guardar Cita"):
-            conflict = any(c['fecha'] == fecha and c['hora'] == hora and c['doctor'] == doctor for c in st.session_state.citas)
-            if conflict:
-                st.warning("⚠️ Ya existe una cita con ese doctor a esa hora.")
-            else:
+    fecha = st.date_input("Selecciona el día para visualizar el calendario", value=date.today())
+    st.markdown(f"### Calendario del día {fecha.strftime('%d-%m-%Y')}")
+
+    # Generar calendario de 8am a 9pm en intervalos de 15 min
+    start_hour = 8
+    end_hour = 21
+    interval_minutes = 15
+
+    current_time = datetime.strptime(f"{start_hour}:00", "%H:%M")
+    end_time = datetime.strptime(f"{end_hour}:00", "%H:%M")
+    time_slots = []
+
+    while current_time < end_time:
+        time_str = current_time.strftime("%H:%M")
+        ocupado = any(c['fecha'] == fecha and c['hora'].strftime("%H:%M") == time_str for c in st.session_state.citas)
+        estado = "🟥 Ocupado" if ocupado else "🟩 Disponible"
+        if st.button(f"{estado} - {time_str}"):
+            if not ocupado:
+                st.session_state.hora_seleccionada = current_time.time()
+        current_time += timedelta(minutes=interval_minutes)
+
+    if st.session_state.hora_seleccionada:
+        st.success(f"Hora seleccionada: {st.session_state.hora_seleccionada.strftime('%H:%M')}")
+        with st.form("form_cita"):
+            paciente = st.selectbox("Seleccionar paciente", [p['nombre'] for p in st.session_state.pacientes])
+            doctor = st.selectbox("Seleccionar doctor", [d['nombre'] for d in st.session_state.doctores])
+            tratamiento = st.text_input("Tratamiento realizado")
+            agendar = st.form_submit_button("Agendar Cita")
+            if agendar:
                 st.session_state.citas.append({
                     "paciente": paciente,
                     "doctor": doctor,
                     "fecha": fecha,
-                    "hora": hora,
+                    "hora": st.session_state.hora_seleccionada,
                     "tratamiento": tratamiento
                 })
-                st.success("✅ Cita guardada.")
-
-    else:
-        st.warning("Debe registrar al menos un paciente y un doctor para agendar citas.")
-
-    st.markdown("---")
-    st.markdown(f"#### 📆 Agenda para el {fecha.strftime('%d-%m-%Y')}")
-    citas_dia = [c for c in st.session_state.citas if c['fecha'] == fecha]
-    if citas_dia:
-        df_citas = pd.DataFrame(citas_dia)
-        df_citas['hora'] = df_citas['hora'].astype(str)
-        st.dataframe(df_citas)
-
-        selected_cita = st.selectbox("Selecciona una cita para registrar detalles financieros", [f"{c['paciente']} ({c['hora']})" for c in citas_dia])
-        if selected_cita:
-            with st.form("detalles_form"):
-                precio = st.number_input("Precio original", min_value=0.0, step=1.0)
-                descuento = st.number_input("Descuento aplicado", min_value=0.0, step=1.0)
-                cuotas = st.number_input("Número de cuotas", min_value=1, step=1)
-
-                monto_final = precio - descuento
-                st.write(f"💰 **Total a pagar con descuento:** ${monto_final:.2f}")
-                estado_pago = "Pagado completo" if cuotas == 1 else f"Pendiente: {cuotas} cuotas"
-
-                agregar = st.form_submit_button("Guardar Detalles")
-                if agregar:
-                    nombre_paciente = selected_cita.split(" (")[0]
-                    st.session_state.detalles.append({
-                        "paciente": nombre_paciente,
-                        "fecha": fecha,
-                        "precio_original": precio,
-                        "descuento": descuento,
-                        "monto_final": monto_final,
-                        "cuotas": cuotas,
-                        "estado_pago": estado_pago
-                    })
-                    st.success("✅ Detalles financieros guardados")
-
-            # Botón de recordatorio por WhatsApp
-            paciente_data = next((p for p in st.session_state.pacientes if p['nombre'] == nombre_paciente), None)
-            if paciente_data:
-                mensaje = f"Hola {nombre_paciente}, te recordamos tu cita dental el {fecha.strftime('%d/%m/%Y')} a las {hora.strftime('%H:%M')}. ¡Te esperamos!"
-                numero = paciente_data['contacto'].replace("+", "")
-                url = f"https://wa.me/{numero}?text={urllib.parse.quote(mensaje)}"
-                st.markdown(f"[📩 Enviar recordatorio por WhatsApp]({url})", unsafe_allow_html=True)
-    else:
-        st.info("No hay citas para esta fecha.")
+                st.success("✅ Cita agendada correctamente")
 
 # PANEL DIARIO
 if st.session_state.get("view") == "panel":
